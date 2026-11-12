@@ -140,7 +140,7 @@ def CalibrateStereoCamera():
 def load_and_undistort_images(image_folder):
     calibration_maps = globals().update(np.load("calibration_maps.npz", allow_pickle=True))
     # Load all images from the specified folder
-    image_files = glob.glob(f"{image_folder}/*.jpg")  # Adjust the file extension if needed
+    image_files = glob.glob(f"{image_folder}/*.png")  
     undistorted_images = []
 
     for image_file in image_files:
