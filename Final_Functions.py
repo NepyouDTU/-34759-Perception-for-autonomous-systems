@@ -44,8 +44,8 @@ def CalibrateStereoCamera():
     - right_images: List of file paths to the right camera images.
     """
     
-    img_L = glob.glob('../0_calib/left/*.png')
-    img_R = glob.glob('../0_calib/right/*.png')
+    img_L = glob.glob('0_calib/left/*.png')
+    img_R = glob.glob('0_calib/right/*.png')
 
     nb_vertical = 5
     nb_horizontal = 7
@@ -137,3 +137,5 @@ def CalibrateStereoCamera():
     )
 
     return True
+
+CalibrateStereoCamera()
