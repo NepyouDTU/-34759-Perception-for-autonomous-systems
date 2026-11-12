@@ -1,0 +1,9 @@
+# Large local datasets
+2_obstacle/
+3_curved_bend/
+4_circle/
+
+# macOS and notebook temporary files
+.DS_Store
+.ipynb_checkpoints/
+__pycache__/
