@@ -30,7 +30,7 @@ from sklearn.datasets import fetch_openml
 import ssl
 from sklearn.datasets import fetch_lfw_people
 from sklearn.neighbors import KNeighborsClassifier
-
+from tqdm import tqdm
 from sklearn.model_selection import LeaveOneOut, KFold, StratifiedKFold
 import cv2
 from numpy.linalg import inv, pinv
@@ -46,7 +46,7 @@ def CalibrateStereoCamera():
     
     img_L = glob.glob('0_calib/left/*.png')
     img_R = glob.glob('0_calib/right/*.png')
-    img_size = cv2.imread(img_L[0]).shape[:2][::-1]  # Assuming all images are the same size
+
     nb_vertical = 5
     nb_horizontal = 7
 
@@ -70,7 +70,7 @@ def CalibrateStereoCamera():
             objpoints.append(objp)
             imgpoints_L.append(corners)
 
-    ret_L, mtx_L, dist_L, rvecs_L, tvecs_L = cv2.calibrateCamera(objpoints, imgpoints_L, img_size, None, None)
+    ret_L, mtx_L, dist_L, rvecs_L, tvecs_L = cv2.calibrateCamera(objpoints, imgpoints_L, gray.shape[::-1], None, None)
 
 
     # Right camera calibration
@@ -93,12 +93,12 @@ def CalibrateStereoCamera():
             objpoints.append(objp)
             imgpoints_R.append(corners)
 
-    ret_R, mtx_R, dist_R, rvecs_R, tvecs_R = cv2.calibrateCamera(objpoints, imgpoints_R, img_size, None, None)
+    ret_R, mtx_R, dist_R, rvecs_R, tvecs_R = cv2.calibrateCamera(objpoints, imgpoints_R, gray.shape[::-1], None, None)
 
     # Stereo calibration
-    ret, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(objpoints, imgpoints_L, imgpoints_R, mtx_L, dist_L, mtx_R, dist_R, img_size, flags=cv2.CALIB_FIX_INTRINSIC)
+    ret, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(objpoints, imgpoints_L, imgpoints_R, mtx_L, dist_L, mtx_R, dist_R, (w,h), flags=cv2.CALIB_FIX_INTRINSIC)
 
-    R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(mtx_L, dist_L, mtx_R, dist_R, img_size, R, T)
+    R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(mtx_L, dist_L, mtx_R, dist_R, (w,h), R, T)
 
     # Compute the undistortion and rectification transformation maps
     mapLx, mapLy = cv2.initUndistortRectifyMap(mtx_L, dist_L, R1, P1, (w, h), cv2.CV_32FC1)
@@ -138,24 +138,4 @@ def CalibrateStereoCamera():
 
     return True
 
-def load_and_undistort_images(image_folder):
-    calibration_maps = globals().update(np.load("calibration_maps.npz", allow_pickle=True))
-    # Load all images from the specified folder
-    image_files = glob.glob(f"{image_folder}/*.jpg")  # Adjust the file extension if needed
-    undistorted_images = []
-
-    for image_file in image_files:
-        # Read the image
-        img = cv2.imread(image_file)
-        if img is None:
-            print(f"Warning: Could not read image {image_file}. Skipping.")
-            continue
-
-        # Undistort the image using the provided maps
-        undistorted_img = cv2.remap(img, mapx, mapy, interpolation=cv2.INTER_LINEAR)
-        undistorted_images.append(undistorted_img)
-
-    return undistorted_images
-
-if __name__ == "__main__":
-    CalibrateStereoCamera()
+CalibrateStereoCamera()
