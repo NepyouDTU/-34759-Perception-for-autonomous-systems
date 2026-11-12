@@ -30,7 +30,6 @@ from sklearn.datasets import fetch_openml
 import ssl
 from sklearn.datasets import fetch_lfw_people
 from sklearn.neighbors import KNeighborsClassifier
-from tqdm import tqdm
 from sklearn.model_selection import LeaveOneOut, KFold, StratifiedKFold
 import cv2
 from numpy.linalg import inv, pinv
@@ -138,4 +137,43 @@ def CalibrateStereoCamera():
 
     return True
 
-CalibrateStereoCamera()
+def load_and_undistort_images(image_folder):
+    """
+    Loads and undistorts images from the specified folder using precomputed calibration maps.
+    
+    """
+    calibration_maps = globals().update(np.load("calibration_maps.npz", allow_pickle=True))
+    # Load all images from the specified folder
+    image_files_left = glob.glob(f"{image_folder}/left/*.png")  
+    image_files_right = glob.glob(f"{image_folder}/right/*.png")  
+
+    undistorted_images_left = []
+
+    for image_file in image_files_left:
+        # Read the image
+        img = cv2.imread(image_file)
+        if img is None:
+            print(f"Warning: Could not read image {image_file}. Skipping.")
+            continue
+
+        # Undistort the image using the provided maps
+        undistorted_img = cv2.remap(img, mapLx, mapLy, interpolation=cv2.INTER_LINEAR)
+        undistorted_images_left.append(undistorted_img)
+
+    undistorted_images_right = []
+    
+    for image_file in image_files_right:
+        # Read the image
+        img = cv2.imread(image_file)
+        if img is None:
+            print(f"Warning: Could not read image {image_file}. Skipping.")
+            continue
+
+        # Undistort the image using the provided maps
+        undistorted_img = cv2.remap(img, mapRx, mapRy, interpolation=cv2.INTER_LINEAR)
+        undistorted_images_right.append(undistorted_img)
+
+    return undistorted_images_left, undistorted_images_right
+
+if __name__ == "__main__":
+    CalibrateStereoCamera()
