@@ -248,13 +248,19 @@ def CalibrateStereoCameraDepr():
 
     return True
 
-def load_and_undistort_images(image_folder, grayscale=False):
+def load_and_undistort_images(image_folder, format=cv2.COLOR_BGR2RGB):
     """
     Loads and undistorts images from the specified folder using precomputed calibration maps.
     
     Parameters:
     - image_folder: Path to the folder containing 'left' and 'right' subfolders with images.
-    - grayscale: If True, returns bgr adn grayscale versions of the undistorted images.
+    - format: cv2.COLOR_BGR2* format to convert the images to (default is cv2.COLOR_BGR2RGB).
+
+    Returns:
+    - undistorted_images_left: List of undistorted left camera images, in chosen format.
+    - undistorted_images_right: List of undistorted right camera images, in chosen format.
+    - undistorted_images_left_gray: List of undistorted left camera images in grayscale.
+    - undistorted_images_right_gray: List of undistorted right camera images in grayscale
     """
     calibration_maps = globals().update(np.load("calibration_maps.npz", allow_pickle=True))
     # Load all images from the specified folder
@@ -287,11 +293,14 @@ def load_and_undistort_images(image_folder, grayscale=False):
         undistorted_img = cv2.remap(img, mapRx, mapRy, interpolation=cv2.INTER_LINEAR)
         undistorted_images_right.append(undistorted_img)
 
-    if grayscale:
-        undistorted_images_left_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in undistorted_images_left]
-        undistorted_images_right_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in undistorted_images_right]
-        return undistorted_images_left, undistorted_images_right, undistorted_images_left_gray, undistorted_images_right_gray
-    return undistorted_images_left, undistorted_images_right
+    
+    undistorted_images_left_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in undistorted_images_left]
+    undistorted_images_right_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in undistorted_images_right]
+    undistorted_images_left = [cv2.cvtColor(img, format) for img in undistorted_images_left]
+    undistorted_images_right = [cv2.cvtColor(img, format) for img in undistorted_images_right]
+
+    return undistorted_images_left, undistorted_images_right, undistorted_images_left_gray, undistorted_images_right_gray
+    
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
