@@ -248,10 +248,13 @@ def CalibrateStereoCameraDepr():
 
     return True
 
-def load_and_undistort_images(image_folder):
+def load_and_undistort_images(image_folder, grayscale=False):
     """
     Loads and undistorts images from the specified folder using precomputed calibration maps.
     
+    Parameters:
+    - image_folder: Path to the folder containing 'left' and 'right' subfolders with images.
+    - grayscale: If True, returns bgr adn grayscale versions of the undistorted images.
     """
     calibration_maps = globals().update(np.load("calibration_maps.npz", allow_pickle=True))
     # Load all images from the specified folder
@@ -284,7 +287,12 @@ def load_and_undistort_images(image_folder):
         undistorted_img = cv2.remap(img, mapRx, mapRy, interpolation=cv2.INTER_LINEAR)
         undistorted_images_right.append(undistorted_img)
 
+    if grayscale:
+        undistorted_images_left_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in undistorted_images_left]
+        undistorted_images_right_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in undistorted_images_right]
+        return undistorted_images_left, undistorted_images_right, undistorted_images_left_gray, undistorted_images_right_gray
     return undistorted_images_left, undistorted_images_right
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
+ 
