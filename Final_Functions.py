@@ -41,7 +41,7 @@ def CalibrateStereoCamera():
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = img.shape[:2]
     print(h, w)
-    image_size = (720, 1280)
+    image_size = (w,h)
 
     # -----
     nb_vertical = 5
@@ -140,6 +140,7 @@ def CalibrateStereoCamera():
         mapLy=mapLy,
         mapRx=mapRx,
         mapRy=mapRy,
+        Q=Q,
     )
 
     return True
@@ -160,10 +161,15 @@ def load_and_undistort_images(image_folder, format=cv2.COLOR_BGR2RGB):
     - undistorted_images_left_gray: List of undistorted left camera images in grayscale.
     - undistorted_images_right_gray: List of undistorted right camera images in grayscale
     """
-    calibration_maps = globals().update(np.load("calibration_maps.npz", allow_pickle=True))
+    calibration_maps = np.load("calibration_maps.npz")
+
+    mapLx = calibration_maps["mapLx"]
+    mapLy = calibration_maps["mapLy"]
+    mapRx = calibration_maps["mapRx"]
+    mapRy = calibration_maps["mapRy"]
     # Load all images from the specified folder
-    image_files_left = glob.glob(f"{image_folder}/left/*.png")  
-    image_files_right = glob.glob(f"{image_folder}/right/*.png")  
+    image_files_left = sorted(glob.glob(f"{image_folder}/left/*.png"))
+    image_files_right = sorted(glob.glob(f"{image_folder}/right/*.png"))    
 
     undistorted_images_left = []
 
