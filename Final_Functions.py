@@ -204,7 +204,46 @@ def load_and_undistort_images(image_folder, format=cv2.COLOR_BGR2RGB):
     undistorted_images_right = [cv2.cvtColor(img, format) for img in undistorted_images_right]
 
     return undistorted_images_left, undistorted_images_right, undistorted_images_left_gray, undistorted_images_right_gray
-    
+
+def robot_masking_MOG2(left_images, history=100, var_threshold=16):
+    """
+    Apply MOG2 background subtraction to a list of left images and return foreground masks.
+    """
+    mog = cv2.createBackgroundSubtractorMOG2(
+        history=history,
+        varThreshold=var_threshold,
+        detectShadows=False
+    )
+
+    foreground_masks = []
+
+    kernel = np.ones((3, 3), np.uint8)
+
+    for img in left_images:
+
+        mask = mog.apply(img)
+
+        mask = cv2.morphologyEx(
+            mask, cv2.MORPH_OPEN, kernel
+        )
+
+        mask = cv2.morphologyEx(
+            mask, cv2.MORPH_CLOSE, kernel
+        )
+
+        num_labels, labels, stats, centroids = (
+            cv2.connectedComponentsWithStats(mask)
+        )
+
+        if num_labels > 1:
+            largest = 1 + np.argmax(
+                stats[1:, cv2.CC_STAT_AREA]
+            )
+            mask = np.uint8(labels == largest) * 255
+
+        foreground_masks.append(mask)
+
+    return foreground_masks
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
