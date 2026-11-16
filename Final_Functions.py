@@ -219,9 +219,16 @@ def robot_masking_MOG2(left_images, history=100, var_threshold=16):
 
     kernel = np.ones((3, 3), np.uint8)
 
-    for img in left_images:
+    for i, img in enumerate(left_images):
+        if i < 2:
+            mog.apply(img)  # Learn the background
+            foreground_masks.append(
+                np.zeros(img.shape[:2], dtype=np.uint8)
+            )
+            continue
 
         mask = mog.apply(img)
+
 
         mask = cv2.morphologyEx(
             mask, cv2.MORPH_OPEN, kernel
