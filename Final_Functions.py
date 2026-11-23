@@ -56,6 +56,8 @@ def CalibrateStereoCamera():
     objp = np.zeros((nb_horizontal * nb_vertical, 3), np.float32)
     objp[:, :2] = np.mgrid[0:nb_vertical, 0:nb_horizontal].T.reshape(-1, 2)
 
+    objp *= 80 # Size of each checkerboard is 80mm.
+
     # Arrays to store object points and image points from all the images.
     objpoints = []  # 3D point in real world space.
     imgpoints_left = []  # 2D points in image plane.
