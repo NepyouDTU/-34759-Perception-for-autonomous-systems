@@ -34,6 +34,7 @@ from sklearn.model_selection import LeaveOneOut, KFold, StratifiedKFold
 import cv2
 from numpy.linalg import inv, pinv
 
+
 def CalibrateStereoCamera():
 
     # -----
@@ -251,6 +252,35 @@ def robot_masking_MOG2(left_images, history=100, var_threshold=16):
         foreground_masks.append(mask)
 
     return foreground_masks
+
+def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=3):
+    left_matcher = cv2.StereoSGBM_create(
+        minDisparity=min_disparity,
+        # Start searching at disparity 0, so far points can still match.
+        numDisparities=num_disparities,
+        blockSize=block_size,
+        P1=8*block_size**2,
+        P2=32*block_size**2,
+        disp12MaxDiff=1,
+        # Drop a pixel when the left-right and right-left disparities differ by more than 1.
+        preFilterCap=31,
+        # Clip the image gradient so bright spots do not dominate the match cost.
+        uniquenessRatio=20,
+        # Keep a match only when it beats the second-best cost by xx percent.
+        speckleWindowSize=80,
+        # Remove connected disparity blobs smaller than 80 pixels.
+        speckleRange=2,
+        # Pixels in one blob may differ by at most 2 disparity levels.
+        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+        # Match along horizontal, vertical, and diagonal paths.
+    )
+    wls = cv2.ximgproc.createDisparityWLSFilter(left_matcher)
+    wls.setLambda(2000)
+    wls.setSigmaColor(0.8)
+    right_matcher = cv2.ximgproc.createRightMatcher(left_matcher)
+
+    return left_matcher, right_matcher, wls
+
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
