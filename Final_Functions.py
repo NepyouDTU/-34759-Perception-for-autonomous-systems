@@ -1,38 +1,12 @@
 import numpy as np
 from matplotlib import pyplot as plt
-import imutils
-import matplotlib.cm as cm
-import ipywidgets as widgets
-from IPython.display import display, clear_output
-from skimage import data
+from IPython.display import display, clear_output, Image
 import glob
 import open3d as o3d
 import copy
-from sklearn.linear_model import LinearRegression
-from mpl_toolkits.mplot3d import Axes3D
-from sklearn.cluster import KMeans, k_means
-from sklearn import linear_model
-from IPython.display import Image, display
 from math import *
-from scipy import ndimage, signal
-import sklearn as sk
-from sklearn import datasets
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
-import pandas as pd
-from sklearn.decomposition import PCA
-import math
-import time
-import datetime as dt
-from sklearn import datasets, svm, metrics
-from sklearn.datasets import fetch_openml
 import ssl
-from sklearn.datasets import fetch_lfw_people
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import LeaveOneOut, KFold, StratifiedKFold
 import cv2
-from numpy.linalg import inv, pinv
 
 ### Calibration of the stereo camera
 def CalibrateStereoCamera():
@@ -611,13 +585,8 @@ def filter_robot_positions_jerk(
     return filtered
 
 ### Pipeline function:
-def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps):    
-### pipeline 
-    # load calibration values
-    calibration = np.load("calibration_maps.npz")
-    Q = calibration["Q"]
-    fps=30
-    baseline_m = 1.0 / abs(Q[3,2]) / 1000.0
+def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps, Q):    
+### pipeline
 
     # Construct stereo matchers
     left_matcher, right_matcher, wls = create_stereo_matchers()
