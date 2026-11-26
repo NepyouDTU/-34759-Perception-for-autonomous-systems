@@ -621,7 +621,7 @@ def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps, Q)
         initial_velocity_std=10,
     )
 
-    return scene_pcd, robot_positions, filtered_positions
+    return scene_pcd, robot_positions, filtered_positions, robot_foreground_masks
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
