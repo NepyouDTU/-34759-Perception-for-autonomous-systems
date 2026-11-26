@@ -56,7 +56,7 @@ def CalibrateStereoCamera():
     objp = np.zeros((nb_horizontal * nb_vertical, 3), np.float32)
     objp[:, :2] = np.mgrid[0:nb_vertical, 0:nb_horizontal].T.reshape(-1, 2)
 
-    objp *= 80 # Size of each checkerboard is 80mm.
+    objp *= 0.080 # Size of each checkerboard is 80mm.
 
     # Arrays to store object points and image points from all the images.
     objpoints = []  # 3D point in real world space.
@@ -414,42 +414,6 @@ def robot_masking_MOG2(left_images, history=100, var_threshold=16):
 
     return foreground_masks
 
-### Visualization functions:
-def visualize_robot_trajectory(scene_pcd, robot_positions):
-    """Show robot centroids and trajectory within the reconstructed scene."""
-    positions = np.asarray(robot_positions, dtype=float)
-    valid = np.isfinite(positions).all(axis=1)
-
-    if not valid.any():
-        raise ValueError("No valid robot positions to visualize.")
-
-    # Map original frame indices to the filtered point indices.
-    point_indices = np.full(len(positions), -1, dtype=int)
-    point_indices[valid] = np.arange(valid.sum())
-
-    # Connect consecutive frames only, preserving gaps in tracking.
-    consecutive = np.flatnonzero(valid[:-1] & valid[1:])
-    lines = np.column_stack((
-        point_indices[consecutive],
-        point_indices[consecutive + 1],
-    ))
-
-    trajectory_points = positions[valid]
-
-    centroids = o3d.geometry.PointCloud()
-    centroids.points = o3d.utility.Vector3dVector(trajectory_points)
-    centroids.paint_uniform_color([1.0, 0.0, 0.0])
-
-    trajectory = o3d.geometry.LineSet()
-    trajectory.points = o3d.utility.Vector3dVector(trajectory_points)
-    trajectory.lines = o3d.utility.Vector2iVector(lines)
-    trajectory.paint_uniform_color([1.0, 0.6, 0.0])
-
-    o3d.visualization.draw_geometries(
-        [scene_pcd, centroids, trajectory],
-        window_name="Robot trajectory",
-        width=1280,
-        height=720,)
 
 def detect_robot_dense_optical(undistLg, start_frame=0, end_frame=None):
     '''
@@ -523,6 +487,43 @@ def detect_robot_dense_optical(undistLg, start_frame=0, end_frame=None):
         
     return foreground_masks
 
+### Visualization functions:
+def visualize_robot_trajectory(scene_pcd, robot_positions):
+    """Show robot centroids and trajectory within the reconstructed scene."""
+    positions = np.asarray(robot_positions, dtype=float)
+    valid = np.isfinite(positions).all(axis=1)
+
+    if not valid.any():
+        raise ValueError("No valid robot positions to visualize.")
+
+    # Map original frame indices to the filtered point indices.
+    point_indices = np.full(len(positions), -1, dtype=int)
+    point_indices[valid] = np.arange(valid.sum())
+
+    # Connect consecutive frames only, preserving gaps in tracking.
+    consecutive = np.flatnonzero(valid[:-1] & valid[1:])
+    lines = np.column_stack((
+        point_indices[consecutive],
+        point_indices[consecutive + 1],
+    ))
+
+    trajectory_points = positions[valid]
+
+    centroids = o3d.geometry.PointCloud()
+    centroids.points = o3d.utility.Vector3dVector(trajectory_points)
+    centroids.paint_uniform_color([1.0, 0.0, 0.0])
+
+    trajectory = o3d.geometry.LineSet()
+    trajectory.points = o3d.utility.Vector3dVector(trajectory_points)
+    trajectory.lines = o3d.utility.Vector2iVector(lines)
+    trajectory.paint_uniform_color([1.0, 0.6, 0.0])
+
+    o3d.visualization.draw_geometries(
+        [scene_pcd, centroids, trajectory],
+        window_name="Robot trajectory",
+        width=1280,
+        height=720,)
+
 def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=3):
     left_matcher = cv2.StereoSGBM_create(
         minDisparity=min_disparity,
@@ -545,42 +546,8 @@ def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=3):
         # Match along horizontal, vertical, and diagonal paths.
     )
 
-### Pipeline function:
-def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps):    
-### pipeline 
-    # Construct stereo matchers
-    left_matcher, right_matcher, wls = create_stereo_matchers()
 
-    # Disparity map calculation
-    disparity_map = calculate_disparity_map(left_matcher, right_matcher, wls, left_images_gray[0], right_images_gray[0])
-
-    # Construct the scene point cloud from disparity map
-    scene_pcd = point_cloud_from_disparity(disparity_map, left_images[0], Q)
-
-    # Construct robot foreground masks.
-    robot_foreground_masks = robot_masking_MOG2(left_images)
-
-    # Reconstruct the robot and its trajectory.
-    robot_pcds, robot_positions = reconstruct_robot_trajectory(
-        left_images,
-        left_images_gray,
-        right_images_gray,
-        robot_foreground_masks,
-        left_matcher,
-        right_matcher,
-        wls,
-        Q,
-    )
-
-    filtered_positions = filter_robot_positions(
-        robot_positions,
-        dt=1 / fps,                         # Actual frame interval in seconds
-        measurement_std=0.5,
-        acceleration_std=5.0,
-        initial_velocity_std=10,
-    )
-
-    return scene_pcd, robot_positions, filtered_positions
+    
 def filter_robot_positions_jerk(
     robot_positions,
     dt,
@@ -666,6 +633,43 @@ def filter_robot_positions_jerk(
 
     return filtered
 
+### Pipeline function:
+def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps):    
+### pipeline 
+    # Construct stereo matchers
+    left_matcher, right_matcher, wls = create_stereo_matchers()
+
+    # Disparity map calculation
+    disparity_map = calculate_disparity_map(left_matcher, right_matcher, wls, left_images_gray[0], right_images_gray[0])
+
+    # Construct the scene point cloud from disparity map
+    scene_pcd = point_cloud_from_disparity(disparity_map, left_images[0], Q)
+
+    # Construct robot foreground masks.
+    # robot_foreground_masks = robot_masking_MOG2(left_images)
+    robot_foreground_masks = detect_robot_dense_optical(left_images_gray)
+
+    # Reconstruct the robot and its trajectory.
+    robot_pcds, robot_positions = reconstruct_robot_trajectory(
+        left_images,
+        left_images_gray,
+        right_images_gray,
+        robot_foreground_masks,
+        left_matcher,
+        right_matcher,
+        wls,
+        Q,
+    )
+
+    filtered_positions = filter_robot_positions(
+        robot_positions,
+        dt=1 / fps,                         # Actual frame interval in seconds
+        measurement_std=0.5,
+        acceleration_std=5.0,
+        initial_velocity_std=10,
+    )
+
+    return scene_pcd, robot_positions, filtered_positions
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
