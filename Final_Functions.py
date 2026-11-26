@@ -613,6 +613,12 @@ def filter_robot_positions_jerk(
 ### Pipeline function:
 def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps):    
 ### pipeline 
+    # load calibration values
+    calibration = np.load("calibration_maps.npz")
+    Q = calibration["Q"]
+    fps=30
+    baseline_m = 1.0 / abs(Q[3,2]) / 1000.0
+
     # Construct stereo matchers
     left_matcher, right_matcher, wls = create_stereo_matchers()
 
