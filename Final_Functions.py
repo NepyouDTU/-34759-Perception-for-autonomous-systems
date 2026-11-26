@@ -34,7 +34,7 @@ from sklearn.model_selection import LeaveOneOut, KFold, StratifiedKFold
 import cv2
 from numpy.linalg import inv, pinv
 
-
+### Calibration of the stereo camera
 def CalibrateStereoCamera():
 
     # -----
@@ -148,8 +148,6 @@ def CalibrateStereoCamera():
 
     return True
 
-
-
 def load_and_undistort_images(image_folder, format=cv2.COLOR_BGR2RGB):
     """
     Loads and undistorts images from the specified folder using precomputed calibration maps.
@@ -208,6 +206,167 @@ def load_and_undistort_images(image_folder, format=cv2.COLOR_BGR2RGB):
 
     return undistorted_images_left, undistorted_images_right, undistorted_images_left_gray, undistorted_images_right_gray
 
+### Disparity map functions:
+def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=9):
+    left_matcher = cv2.StereoSGBM_create(
+        minDisparity=min_disparity,
+        # Start searching at disparity 0, so far points can still match.
+        numDisparities=num_disparities,
+        blockSize=block_size,
+        P1=8*block_size**2,
+        P2=32*block_size**2,
+        disp12MaxDiff=1,
+        # Drop a pixel when the left-right and right-left disparities differ by more than 1.
+        preFilterCap=31,
+        # Clip the image gradient so bright spots do not dominate the match cost.
+        uniquenessRatio=20,
+        # Keep a match only when it beats the second-best cost by xx percent.
+        speckleWindowSize=80,
+        # Remove connected disparity blobs smaller than 80 pixels.
+        speckleRange=2,
+        # Pixels in one blob may differ by at most 2 disparity levels.
+        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+        # Match along horizontal, vertical, and diagonal paths.
+    )
+    wls = cv2.ximgproc.createDisparityWLSFilter(left_matcher)
+    wls.setLambda(2000)
+    wls.setSigmaColor(0.8)
+    right_matcher = cv2.ximgproc.createRightMatcher(left_matcher)
+
+    return left_matcher, right_matcher, wls
+
+def calculate_disparity_map(left_matcher, right_matcher, wls, left_image_gray, right_image_gray):
+
+    disp_left = left_matcher.compute(left_image_gray, right_image_gray)
+    disp_right = right_matcher.compute(right_image_gray, left_image_gray)
+
+    # Spread reliable disparity into flat pixels, but stop at a color edge
+    disparity_map = wls.filter(disp_left, left_image_gray, None, disp_right).astype(np.float32) / 16
+    
+    # Invalid pixels are -2048. Keep them out of the color scale.
+    disparity_map[disparity_map < 0] = np.nan
+
+    return disparity_map
+
+### Point cloud functions:
+def point_cloud_from_disparity(disparity_map, left_image, Q, min_disparity=3, ):   
+
+    points_3D = cv2.reprojectImageTo3D(disparity_map, Q)
+
+    mask = ((disparity_map > min_disparity) & np.isfinite(points_3D).all(axis=2))
+
+    points = points_3D[mask]
+    colors = left_image[mask] / 255.0
+
+    pcd = o3d.geometry.PointCloud()
+
+    pcd.points = o3d.utility.Vector3dVector(points)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+    
+    pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+
+    return pcd
+
+def reconstruct_robot_trajectory(left_images, left_images_gray, right_images_gray, foreground_masks, left_matcher, right_matcher, wls, Q):
+    """Return robot point clouds and centroid positions for all frames."""
+
+    robot_pcds = []
+    robot_positions = []
+
+    frames = zip(left_images, left_images_gray, right_images_gray, foreground_masks, strict=True)
+
+    for left_image, left_gray, right_gray, foreground_mask in frames:
+        disparity_map = calculate_disparity_map(
+            left_matcher, right_matcher, wls, left_gray, right_gray
+        )
+
+        # Preserve pixel coordinates while excluding the background.
+        robot_disparity = disparity_map.copy()
+        robot_disparity[foreground_mask <= 0] = np.nan
+
+        robot_pcd = point_cloud_from_disparity(
+            robot_disparity, left_image, Q
+        )
+        robot_pcds.append(robot_pcd)
+
+        points = np.asarray(robot_pcd.points)
+        center = (
+            points.mean(axis=0)
+            if len(points) > 0
+            else np.full(3, np.nan)
+        )
+        robot_positions.append(center)
+
+    return robot_pcds, np.asarray(robot_positions)
+
+### Filter functions:
+def filter_robot_positions(
+    robot_positions,
+    dt,
+    measurement_std,
+    acceleration_std,
+    initial_velocity_std,
+):
+    measurements = np.asarray(robot_positions, dtype=float)
+    filtered = np.full_like(measurements, np.nan)
+
+    kf = cv2.KalmanFilter(6, 3, 0, cv2.CV_64F)
+
+    # Position advances according to velocity.
+    F = np.eye(6)
+    F[:3, 3:] = dt * np.eye(3)
+    kf.transitionMatrix = F
+
+    # We measure position, not velocity.
+    H = np.zeros((3, 6))
+    H[:, :3] = np.eye(3)
+    kf.measurementMatrix = H
+
+    # Measurement uncertainty.
+    R = measurement_std**2 * np.eye(3)
+    kf.measurementNoiseCov = R
+
+    # Model uncertainty: unknown acceleration during each frame interval.
+    G = np.vstack([
+        0.5 * dt**2 * np.eye(3),
+        dt * np.eye(3),
+    ])
+    kf.processNoiseCov = acceleration_std**2 * (G @ G.T)
+
+    initialized = False
+
+    for i, position in enumerate(measurements):
+        valid = np.isfinite(position).all()
+
+        if not initialized:
+            if not valid:
+                continue
+
+            kf.statePost = np.concatenate([
+                position, np.zeros(3)
+            ]).reshape(6, 1)
+
+            kf.errorCovPost = np.diag(
+                [measurement_std**2] * 3
+                + [initial_velocity_std**2] * 3
+            )
+
+            filtered[i] = position
+            initialized = True
+            continue
+
+        prediction = kf.predict()
+
+        if valid:
+            estimate = kf.correct(position.reshape(3, 1))
+        else:
+            estimate = prediction
+
+        filtered[i] = estimate[:3, 0]
+
+    return filtered
+
+### Mask functions:
 def robot_masking_MOG2(left_images, history=100, var_threshold=16):
     """
     Apply MOG2 background subtraction to a list of left images and return foreground masks.
@@ -255,34 +414,80 @@ def robot_masking_MOG2(left_images, history=100, var_threshold=16):
 
     return foreground_masks
 
-def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=3):
-    left_matcher = cv2.StereoSGBM_create(
-        minDisparity=min_disparity,
-        # Start searching at disparity 0, so far points can still match.
-        numDisparities=num_disparities,
-        blockSize=block_size,
-        P1=8*block_size**2,
-        P2=32*block_size**2,
-        disp12MaxDiff=1,
-        # Drop a pixel when the left-right and right-left disparities differ by more than 1.
-        preFilterCap=31,
-        # Clip the image gradient so bright spots do not dominate the match cost.
-        uniquenessRatio=20,
-        # Keep a match only when it beats the second-best cost by xx percent.
-        speckleWindowSize=80,
-        # Remove connected disparity blobs smaller than 80 pixels.
-        speckleRange=2,
-        # Pixels in one blob may differ by at most 2 disparity levels.
-        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
-        # Match along horizontal, vertical, and diagonal paths.
+### Visualization functions:
+def visualize_robot_trajectory(scene_pcd, robot_positions):
+    """Show robot centroids and trajectory within the reconstructed scene."""
+    positions = np.asarray(robot_positions, dtype=float)
+    valid = np.isfinite(positions).all(axis=1)
+
+    if not valid.any():
+        raise ValueError("No valid robot positions to visualize.")
+
+    # Map original frame indices to the filtered point indices.
+    point_indices = np.full(len(positions), -1, dtype=int)
+    point_indices[valid] = np.arange(valid.sum())
+
+    # Connect consecutive frames only, preserving gaps in tracking.
+    consecutive = np.flatnonzero(valid[:-1] & valid[1:])
+    lines = np.column_stack((
+        point_indices[consecutive],
+        point_indices[consecutive + 1],
+    ))
+
+    trajectory_points = positions[valid]
+
+    centroids = o3d.geometry.PointCloud()
+    centroids.points = o3d.utility.Vector3dVector(trajectory_points)
+    centroids.paint_uniform_color([1.0, 0.0, 0.0])
+
+    trajectory = o3d.geometry.LineSet()
+    trajectory.points = o3d.utility.Vector3dVector(trajectory_points)
+    trajectory.lines = o3d.utility.Vector2iVector(lines)
+    trajectory.paint_uniform_color([1.0, 0.6, 0.0])
+
+    o3d.visualization.draw_geometries(
+        [scene_pcd, centroids, trajectory],
+        window_name="Robot trajectory",
+        width=1280,
+        height=720,
     )
-    wls = cv2.ximgproc.createDisparityWLSFilter(left_matcher)
-    wls.setLambda(2000)
-    wls.setSigmaColor(0.8)
-    right_matcher = cv2.ximgproc.createRightMatcher(left_matcher)
 
-    return left_matcher, right_matcher, wls
+### Pipeline function:
+def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps):    
+### pipeline 
+    # Construct stereo matchers
+    left_matcher, right_matcher, wls = create_stereo_matchers()
 
+    # Disparity map calculation
+    disparity_map = calculate_disparity_map(left_matcher, right_matcher, wls, left_images_gray[0], right_images_gray[0])
+
+    # Construct the scene point cloud from disparity map
+    scene_pcd = point_cloud_from_disparity(disparity_map, left_images[0], Q)
+
+    # Construct robot foreground masks.
+    robot_foreground_masks = robot_masking_MOG2(left_images)
+
+    # Reconstruct the robot and its trajectory.
+    robot_pcds, robot_positions = reconstruct_robot_trajectory(
+        left_images,
+        left_images_gray,
+        right_images_gray,
+        robot_foreground_masks,
+        left_matcher,
+        right_matcher,
+        wls,
+        Q,
+    )
+
+    filtered_positions = filter_robot_positions(
+        robot_positions,
+        dt=1 / fps,                         # Actual frame interval in seconds
+        measurement_std=0.5,
+        acceleration_std=5.0,
+        initial_velocity_std=10,
+    )
+
+    return scene_pcd, robot_positions, filtered_positions
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
