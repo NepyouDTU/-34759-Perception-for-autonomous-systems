@@ -449,7 +449,100 @@ def visualize_robot_trajectory(scene_pcd, robot_positions):
         [scene_pcd, centroids, trajectory],
         window_name="Robot trajectory",
         width=1280,
-        height=720,
+        height=720,)
+
+def detect_robot_dense_optical(undistLg, start_frame=0, end_frame=None):
+    '''
+    Detects the robot in a sequence of undistorted grayscale images
+    by computing optical flow and generating masks based on the magnitude of the flow.
+
+    parameters:
+    - undistLg: list; undistorted and rectified images from the left camera in a stereo camera
+    - start_frame: int; positive start frame number
+    - end_frame: ing; end_frame number
+
+    returns:
+    - masks: List of masks only indicating the detected robot regions in each frame.
+    '''
+    
+    flows = []
+    magnitudes = []
+    shape = undistLg[0].shape
+    ROIy = [325, 600]
+    ROIx = [0, 1280]
+
+    foreground_masks = []
+
+    threshold = 3.0
+    open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+
+    # loop through the undistorted grayscale images to compute optical flow
+    if end_frame == None:
+        end_frame = len(undistLg) - 1
+    elif end_frame > (len(undistLg) - 1):
+        print("end frame out of bounds")
+        return 
+
+    for i in range(start_frame, end_frame):
+        gray1 = undistLg[i][ROIy[0]:ROIy[1], ROIx[0]:ROIx[1]]
+        gray2 = undistLg[i + 1][ROIy[0]:ROIy[1], ROIx[0]:ROIx[1]]
+
+        # get Optical flow
+        flow = cv2.calcOpticalFlowFarneback(
+            gray1, gray2,
+            None,
+            0.5, 3, 15, 3, 5, 1.5, 0
+        )
+
+        # convert flow to polar coordinates to get magnitude and angle
+        mag,theta = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+
+        # flows.append(flow)
+        # magnitudes.append(mag)
+        mask = np.zeros(shape, dtype=np.uint8)
+        mask[ROIy[0]:ROIy[1], ROIx[0]:ROIx[1]] = (mag > threshold).astype(np.uint8) * 255
+
+         # do opening and closing to remove noise and fill gaps in the masks
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=3)
+
+        num_labels, labels, stats, centroids = (
+            cv2.connectedComponentsWithStats(mask)
+        )
+
+        if num_labels > 1:
+            largest = 1 + np.argmax(
+            stats[1:, cv2.CC_STAT_AREA]
+            )
+            mask = np.uint8(labels == largest) * 255
+        
+        foreground_masks.append(mask)
+    # Copy the last mask to match number of images 
+    foreground_masks.append(mask)
+        
+    return foreground_masks
+
+def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=3):
+    left_matcher = cv2.StereoSGBM_create(
+        minDisparity=min_disparity,
+        # Start searching at disparity 0, so far points can still match.
+        numDisparities=num_disparities,
+        blockSize=block_size,
+        P1=8*block_size**2,
+        P2=32*block_size**2,
+        disp12MaxDiff=1,
+        # Drop a pixel when the left-right and right-left disparities differ by more than 1.
+        preFilterCap=31,
+        # Clip the image gradient so bright spots do not dominate the match cost.
+        uniquenessRatio=20,
+        # Keep a match only when it beats the second-best cost by xx percent.
+        speckleWindowSize=80,
+        # Remove connected disparity blobs smaller than 80 pixels.
+        speckleRange=2,
+        # Pixels in one blob may differ by at most 2 disparity levels.
+        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+        # Match along horizontal, vertical, and diagonal paths.
     )
 
 ### Pipeline function:
@@ -488,6 +581,91 @@ def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps):
     )
 
     return scene_pcd, robot_positions, filtered_positions
+def filter_robot_positions_jerk(
+    robot_positions,
+    dt,
+    measurement_std,
+    jerk_std,
+    initial_velocity_std,
+    initial_acceleration_std
+):
+    """
+    parameters:
+    - robot_positions: List of 3D positions (x, y, z) of the robot over time.
+    - dt: Time step between measurements.
+    - measurement_std: Standard deviation of the measurement noise.
+    - jerk_std: Standard deviation of the jerk (third derivative of position).
+    - initial_velocity_std: Standard deviation of the initial velocity estimate.
+    - initial_acceleration_std: Standard deviation of the initial acceleration estimate.
+
+    Output:
+    - filtered: List of filtered 3D positions (x, y, z) of the robot over time, after applying the Kalman filter with jerk modeling.
+
+    """
+
+    measurements = np.asarray(robot_positions, dtype=float)
+    filtered = np.full_like(measurements, np.nan)
+
+    I = np.eye(3)
+    kf = cv2.KalmanFilter(9, 3, 0, cv2.CV_64F)
+
+    F = np.eye(9)
+    F[0:3, 3:6] = dt * I
+    F[0:3, 6:9] = 0.5 * dt**2 * I
+    F[3:6, 6:9] = dt * I
+    kf.transitionMatrix = F
+
+    # Measurements still contain position only: x, y, z.
+    H = np.zeros((3, 9))
+    H[:, :3] = I
+    kf.measurementMatrix = H
+
+    # Measurement uncertainty.
+    R = measurement_std**2 * np.eye(3)
+    kf.measurementNoiseCov = R  
+
+    G = np.vstack([
+        (dt**3 / 6) * I,
+        (dt**2 / 2) * I,
+        dt * I,
+    ])
+
+    kf.processNoiseCov = jerk_std**2 * (G @ G.T)
+
+    initialized = False
+
+    for i, position in enumerate(measurements):
+        valid = np.isfinite(position).all()
+
+        if not initialized:
+            if not valid:
+                continue
+
+            kf.statePost = np.concatenate([
+                position, np.zeros(6)
+            ]).reshape(9, 1)
+
+            kf.errorCovPost = np.diag(
+                [measurement_std**2] * 3
+                + [initial_velocity_std**2] * 3
+                + [initial_acceleration_std**2] * 3
+            )
+
+            filtered[i] = position
+            initialized = True
+            continue
+
+        prediction = kf.predict()
+
+        if valid:
+            estimate = kf.correct(position.reshape(3, 1))
+        else:
+            estimate = prediction
+
+        filtered[i] = estimate[:3, 0]
+
+    return filtered
+
 
 if __name__ == "__main__":
     CalibrateStereoCamera()
