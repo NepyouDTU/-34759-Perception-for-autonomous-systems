@@ -544,6 +544,14 @@ def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=3):
         # Pixels in one blob may differ by at most 2 disparity levels.
         mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
         # Match along horizontal, vertical, and diagonal paths.
+
+        wls = cv2.ximgproc.createDisparityWLSFilter(left_matcher)
+        wls.setLambda(2000)
+        wls.setSigmaColor(0.8)
+
+        right_matcher = cv2.ximgproc.createRightMatcher(left_matcher)
+
+        return left_matcher, right_matcher, wls
     )
 
 
