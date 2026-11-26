@@ -524,37 +524,6 @@ def visualize_robot_trajectory(scene_pcd, robot_positions):
         width=1280,
         height=720,)
 
-def create_stereo_matchers(min_disparity=0, num_disparities=5*16, block_size=3):
-    left_matcher = cv2.StereoSGBM_create(
-        minDisparity=min_disparity,
-        # Start searching at disparity 0, so far points can still match.
-        numDisparities=num_disparities,
-        blockSize=block_size,
-        P1=8*block_size**2,
-        P2=32*block_size**2,
-        disp12MaxDiff=1,
-        # Drop a pixel when the left-right and right-left disparities differ by more than 1.
-        preFilterCap=31,
-        # Clip the image gradient so bright spots do not dominate the match cost.
-        uniquenessRatio=20,
-        # Keep a match only when it beats the second-best cost by xx percent.
-        speckleWindowSize=80,
-        # Remove connected disparity blobs smaller than 80 pixels.
-        speckleRange=2,
-        # Pixels in one blob may differ by at most 2 disparity levels.
-        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
-        # Match along horizontal, vertical, and diagonal paths.
-
-        wls = cv2.ximgproc.createDisparityWLSFilter(left_matcher)
-        wls.setLambda(2000)
-        wls.setSigmaColor(0.8)
-
-        right_matcher = cv2.ximgproc.createRightMatcher(left_matcher)
-
-        return left_matcher, right_matcher, wls
-    )
-
-
     
 def filter_robot_positions_jerk(
     robot_positions,
@@ -644,6 +613,12 @@ def filter_robot_positions_jerk(
 ### Pipeline function:
 def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps):    
 ### pipeline 
+    # load calibration values
+    calibration = np.load("calibration_maps.npz")
+    Q = calibration["Q"]
+    fps=30
+    baseline_m = 1.0 / abs(Q[3,2]) / 1000.0
+
     # Construct stereo matchers
     left_matcher, right_matcher, wls = create_stereo_matchers()
 
