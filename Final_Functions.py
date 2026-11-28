@@ -496,7 +496,11 @@ def visualize_robot_trajectory(scene_pcd, robot_positions):
         [scene_pcd, centroids, trajectory],
         window_name="Robot trajectory",
         width=1280,
-        height=720,)
+        height=720,
+        zoom=0.4,
+        front=[0.1, -0.5, -1],
+        lookat=scene_pcd.get_center(),
+        up=[0, -1, 0],)
 
     
 def filter_robot_positions_jerk(
