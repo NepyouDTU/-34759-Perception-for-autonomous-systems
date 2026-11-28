@@ -411,9 +411,9 @@ def detect_robot_dense_optical(undistLg, start_frame=0, end_frame=None):
 
     foreground_masks = []
 
-    threshold = 3.0
+    threshold = 0.5
     open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
     # loop through the undistorted grayscale images to compute optical flow
     if end_frame == None:
@@ -443,17 +443,20 @@ def detect_robot_dense_optical(undistLg, start_frame=0, end_frame=None):
 
          # do opening and closing to remove noise and fill gaps in the masks
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=3)
+        # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=3)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=1)
 
         num_labels, labels, stats, centroids = (
             cv2.connectedComponentsWithStats(mask)
         )
-
         if num_labels > 1:
-            largest = 1 + np.argmax(
-            stats[1:, cv2.CC_STAT_AREA]
-            )
-            mask = np.uint8(labels == largest) * 255
+            largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+            # display(stats[largest, cv2.CC_STAT_AREA])
+            if stats[largest, cv2.CC_STAT_AREA] > 560:
+                mask = np.uint8(labels == largest) * 255
+            else:
+                mask = np.zeros_like(mask)
+            
         
         foreground_masks.append(mask)
     # Copy the last mask to match number of images 
@@ -620,7 +623,7 @@ def pipeline(left_images,right_images,left_images_gray,right_images_gray,fps, Q)
     filtered_positions = filter_robot_positions(
         robot_positions,
         dt=1 / fps,                         # Actual frame interval in seconds
-        measurement_std=0.5,
+        measurement_std=10.0,
         acceleration_std=5.0,
         initial_velocity_std=10,
     )
